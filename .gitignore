@@ -2,3 +2,4 @@ env/
 plan.md
 data/
 lightning_logs/
+__pycache__/

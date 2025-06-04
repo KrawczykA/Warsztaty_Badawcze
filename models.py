@@ -919,7 +919,7 @@ class SimCLRModel(pl.LightningModule):
         self.projection_head = SimCLRProjectionHead(
             hidden_dim, hidden_dim, 128
         )
-        self.criterion = torchmetrics.NTXentLoss()
+        self.criterion = NTXentLoss()
         self.lr = lr
         self.weight_decay = weight_decay
         self.max_epochs = max_epochs
