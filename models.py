@@ -949,7 +949,34 @@ class SimCLRModel(pl.LightningModule):
         return z
 
     def training_step(self, batch, batch_idx):  # Fixed: added missing colon
-        (x1, x2), labels = batch
+        # Handle different possible batch structures
+        if isinstance(batch, tuple) and len(batch) == 2:
+            # Expected format: ((x1, x2), labels)
+            (x1, x2), labels = batch
+        elif isinstance(batch, list) and len(batch) == 3:
+            # Alternative format: [x1, x2, labels]
+            x1, x2, labels = batch
+        elif isinstance(batch, tuple) and len(batch) == 3:
+            # Alternative format: (x1, x2, labels)
+            x1, x2, labels = batch
+        else:
+            # Try to infer structure based on batch content
+            if len(batch) == 2:
+                # Could be (inputs, labels) where inputs contains both views
+                inputs, labels = batch
+                if isinstance(inputs, torch.Tensor) and inputs.shape[0] == 2:
+                    # Inputs might be a stacked tensor with two views
+                    x1, x2 = inputs[0], inputs[1]
+                elif isinstance(inputs, (list, tuple)) and len(inputs) == 2:
+                    # Inputs might be a list/tuple of two tensors
+                    x1, x2 = inputs
+                else:
+                    # Handle case where inputs is a single view (use it as both views)
+                    x1 = x2 = inputs
+            else:
+                raise ValueError(f"Unexpected batch format: {type(batch)}, {len(batch)}")
+
+
         z1, z2 = self.forward(x1), self.forward(x2)
         loss = self.criterion(z1, z2)
         self.log("train_loss", loss, prog_bar=True)
@@ -981,7 +1008,34 @@ class SimCLRModel(pl.LightningModule):
             self.train_labels.clear()
 
     def validation_step(self, batch, batch_idx):
-        (x1, x2), labels = batch
+        # Handle different possible batch structures
+        if isinstance(batch, tuple) and len(batch) == 2:
+            # Expected format: ((x1, x2), labels)
+            (x1, x2), labels = batch
+        elif isinstance(batch, list) and len(batch) == 3:
+            # Alternative format: [x1, x2, labels]
+            x1, x2, labels = batch
+        elif isinstance(batch, tuple) and len(batch) == 3:
+            # Alternative format: (x1, x2, labels)
+            x1, x2, labels = batch
+        else:
+            # Try to infer structure based on batch content
+            if len(batch) == 2:
+                # Could be (inputs, labels) where inputs contains both views
+                inputs, labels = batch
+                if isinstance(inputs, torch.Tensor) and inputs.shape[0] == 2:
+                    # Inputs might be a stacked tensor with two views
+                    x1, x2 = inputs[0], inputs[1]
+                elif isinstance(inputs, (list, tuple)) and len(inputs) == 2:
+                    # Inputs might be a list/tuple of two tensors
+                    x1, x2 = inputs
+                else:
+                    # Handle case where inputs is a single view (use it as both views)
+                    x1 = x2 = inputs
+            else:
+                raise ValueError(f"Unexpected batch format: {type(batch)}, {len(batch)}")
+
+
         z1, z2 = self.forward(x1), self.forward(x2)
         loss = self.criterion(z1, z2)
         self.log("val_loss", loss, prog_bar=True)
@@ -1012,7 +1066,34 @@ class SimCLRModel(pl.LightningModule):
             self.val_labels.clear()
 
     def test_step(self, batch, batch_idx):
-        (x1, x2), labels = batch
+        # Handle different possible batch structures
+        if isinstance(batch, tuple) and len(batch) == 2:
+            # Expected format: ((x1, x2), labels)
+            (x1, x2), labels = batch
+        elif isinstance(batch, list) and len(batch) == 3:
+            # Alternative format: [x1, x2, labels]
+            x1, x2, labels = batch
+        elif isinstance(batch, tuple) and len(batch) == 3:
+            # Alternative format: (x1, x2, labels)
+            x1, x2, labels = batch
+        else:
+            # Try to infer structure based on batch content
+            if len(batch) == 2:
+                # Could be (inputs, labels) where inputs contains both views
+                inputs, labels = batch
+                if isinstance(inputs, torch.Tensor) and inputs.shape[0] == 2:
+                    # Inputs might be a stacked tensor with two views
+                    x1, x2 = inputs[0], inputs[1]
+                elif isinstance(inputs, (list, tuple)) and len(inputs) == 2:
+                    # Inputs might be a list/tuple of two tensors
+                    x1, x2 = inputs
+                else:
+                    # Handle case where inputs is a single view (use it as both views)
+                    x1 = x2 = inputs
+            else:
+                raise ValueError(f"Unexpected batch format: {type(batch)}, {len(batch)}")
+
+
         z1, z2 = self.forward(x1), self.forward(x2)
         loss = self.criterion(z1, z2)
         self.log("test_loss", loss, prog_bar=True)
