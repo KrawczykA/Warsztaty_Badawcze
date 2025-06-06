@@ -66,6 +66,30 @@ def create_resnet18_backbone(pretrained: bool = True):
 
     return resnet
 
+def create_resnet18_classifier_backbone(pretrained: bool = True, n_classes: int = 10):
+    """Create ResNet18 backbone with or without pretrained weights."""
+    """Create ResNet18 backbone with or without pretrained weights."""
+    import torchvision.models as models
+
+    if pretrained:
+        # Load pretrained ResNet18
+        resnet = models.resnet18(pretrained=True)
+    else:
+        # Create ResNet18 with random initialization
+        resnet = models.resnet18(pretrained=False)
+        # Apply custom initialization
+        for m in resnet.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    resnet.fc = nn.Linear(resnet.fc.in_features, n_classes)
+
+    return resnet
+
+
 def create_backbone(backbone_type: Literal["pretrained_resnet18", "random_resnet18", "simple_mlp"], input_dim):
     # Create backbone based on type
     if backbone_type == "pretrained_resnet18":
@@ -90,9 +114,116 @@ def create_backbone(backbone_type: Literal["pretrained_resnet18", "random_resnet
 
     return backbone, hidden_dim
 
+def create_classifier_backbone(backbone_type: Literal["pretrained_resnet18", "random_resnet18", "simple_mlp"], input_dim, n_classes):
+    # Create backbone based on type
+    if backbone_type == "pretrained_resnet18":
+        # Option 1: Pretrained ResNet18
+        backbone = create_resnet18_classifier_backbone(pretrained=True, n_classes=n_classes)
+        hidden_dim = backbone.fc.in_features
+
+    elif backbone_type == "random_resnet18":
+        # Option 2: ResNet18 architecture with random initialization
+        backbone = create_resnet18_classifier_backbone(pretrained=False, n_classes=n_classes)
+        hidden_dim = backbone.fc.in_features
+    # ta opcja nie działa tak na prawdę
+    elif backbone_type == "simple_mlp":
+        # Option 3: Simple MLP with ~1M parameters
+        backbone = SimpleMLP(input_dim=input_dim)
+        hidden_dim = backbone.fc.in_features
+    else:
+        raise ValueError(f"Unknown backbone_type: {backbone_type}")
+
+    return backbone, hidden_dim
+
 class ClassifierModel(pl.LightningModule):
-    def __init__(self, model: torch.nn.Module, num_classes, lr: float = 6e-2, weight_decay: float = 5e-4, max_epochs: int = 100):
+    def __init__(self, num_classes, lr: float = 6e-2, weight_decay: float = 5e-4, max_epochs: int = 100, backbone_type: Literal["pretrained_resnet18", "random_resnet18", "simple_mlp"] = "pretrained_resnet18",
+                 input_dim: int = 150528):
         super().__init__()
+        model, hidden_dim = create_classifier_backbone(backbone_type, input_dim, num_classes)
+        self.model = model
+        self.criterion = torch.nn.CrossEntropyLoss()
+        self.lr = lr
+        self.weight_decay = weight_decay
+        self.max_epochs = max_epochs
+        self.save_hyperparameters(ignore=["model"])
+
+        # Separate metrics for each phase to avoid state contamination
+        self.train_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
+        self.val_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
+        self.test_metric = torchmetrics.Accuracy(task="multiclass", num_classes=num_classes)
+
+        self.train_acc = []
+        self.val_acc = []
+        self.test_acc = []
+
+    def forward(self, x):
+        return self.model(x)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = self.criterion(y_hat, y)
+
+        preds = torch.argmax(y_hat, dim=1)
+        self.train_metric(preds, y)
+
+        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_acc", self.train_metric, prog_bar=True, on_epoch=True, on_step=False)
+
+        return loss
+
+    def on_train_epoch_end(self):
+        epoch_acc = self.train_metric.compute()
+        self.train_acc.append(epoch_acc)
+        self.train_metric.reset()
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = self.criterion(y_hat, y)
+
+        preds = torch.argmax(y_hat, dim=1)
+        self.val_metric(preds, y)
+
+        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_acc", self.val_metric, prog_bar=True)
+
+        return loss
+
+    def on_validation_epoch_end(self):
+        epoch_acc = self.val_metric.compute()
+        self.val_acc.append(epoch_acc)
+        self.val_metric.reset()
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = self.criterion(y_hat, y)
+
+        preds = torch.argmax(y_hat, dim=1)
+        self.test_metric(preds, y)
+
+        self.log("test_loss", loss, prog_bar=True)
+        self.log("test_acc", self.test_metric, prog_bar=True)
+
+        return loss
+
+    def on_test_epoch_end(self):
+        epoch_acc = self.test_metric.compute()
+        self.test_acc.append(epoch_acc)
+        self.test_metric.reset()
+
+    def configure_optimizers(self):
+        optim = torch.optim.AdamW(
+            self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, self.max_epochs)
+        return [optim], [scheduler]
+
+class ClassifierModelSpecific(pl.LightningModule):
+    def __init__(self, model: torch.nn.Module, num_classes: int, lr: float = 6e-2, weight_decay: float = 5e-4, max_epochs: int = 100):
+        super().__init__()
+        model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
         self.model = model
         self.criterion = torch.nn.CrossEntropyLoss()
         self.lr = lr
@@ -919,7 +1050,7 @@ class SimCLRModel(pl.LightningModule):
         self.projection_head = SimCLRProjectionHead(
             hidden_dim, hidden_dim, 128
         )
-        self.criterion = torchmetrics.NTXentLoss()
+        self.criterion = NTXentLoss()
         self.lr = lr
         self.weight_decay = weight_decay
         self.max_epochs = max_epochs
@@ -949,7 +1080,33 @@ class SimCLRModel(pl.LightningModule):
         return z
 
     def training_step(self, batch, batch_idx):  # Fixed: added missing colon
-        (x1, x2), labels = batch
+        # Handle different possible batch structures
+        if isinstance(batch, tuple) and len(batch) == 2:
+            # Expected format: ((x1, x2), labels)
+            (x1, x2), labels = batch
+        elif isinstance(batch, list) and len(batch) == 3:
+            # Alternative format: [x1, x2, labels]
+            x1, x2, labels = batch
+        elif isinstance(batch, tuple) and len(batch) == 3:
+            # Alternative format: (x1, x2, labels)
+            x1, x2, labels = batch
+        else:
+            # Try to infer structure based on batch content
+            if len(batch) == 2:
+                # Could be (inputs, labels) where inputs contains both views
+                inputs, labels = batch
+                if isinstance(inputs, torch.Tensor) and inputs.shape[0] == 2:
+                    # Inputs might be a stacked tensor with two views
+                    x1, x2 = inputs[0], inputs[1]
+                elif isinstance(inputs, (list, tuple)) and len(inputs) == 2:
+                    # Inputs might be a list/tuple of two tensors
+                    x1, x2 = inputs
+                else:
+                    # Handle case where inputs is a single view (use it as both views)
+                    x1 = x2 = inputs
+            else:
+                raise ValueError(f"Unexpected batch format: {type(batch)}, {len(batch)}")
+
         z1, z2 = self.forward(x1), self.forward(x2)
         loss = self.criterion(z1, z2)
         self.log("train_loss", loss, prog_bar=True)
@@ -981,7 +1138,33 @@ class SimCLRModel(pl.LightningModule):
             self.train_labels.clear()
 
     def validation_step(self, batch, batch_idx):
-        (x1, x2), labels = batch
+        # Handle different possible batch structures
+        if isinstance(batch, tuple) and len(batch) == 2:
+            # Expected format: ((x1, x2), labels)
+            (x1, x2), labels = batch
+        elif isinstance(batch, list) and len(batch) == 3:
+            # Alternative format: [x1, x2, labels]
+            x1, x2, labels = batch
+        elif isinstance(batch, tuple) and len(batch) == 3:
+            # Alternative format: (x1, x2, labels)
+            x1, x2, labels = batch
+        else:
+            # Try to infer structure based on batch content
+            if len(batch) == 2:
+                # Could be (inputs, labels) where inputs contains both views
+                inputs, labels = batch
+                if isinstance(inputs, torch.Tensor) and inputs.shape[0] == 2:
+                    # Inputs might be a stacked tensor with two views
+                    x1, x2 = inputs[0], inputs[1]
+                elif isinstance(inputs, (list, tuple)) and len(inputs) == 2:
+                    # Inputs might be a list/tuple of two tensors
+                    x1, x2 = inputs
+                else:
+                    # Handle case where inputs is a single view (use it as both views)
+                    x1 = x2 = inputs
+            else:
+                raise ValueError(f"Unexpected batch format: {type(batch)}, {len(batch)}")
+
         z1, z2 = self.forward(x1), self.forward(x2)
         loss = self.criterion(z1, z2)
         self.log("val_loss", loss, prog_bar=True)
@@ -1012,7 +1195,33 @@ class SimCLRModel(pl.LightningModule):
             self.val_labels.clear()
 
     def test_step(self, batch, batch_idx):
-        (x1, x2), labels = batch
+        # Handle different possible batch structures
+        if isinstance(batch, tuple) and len(batch) == 2:
+            # Expected format: ((x1, x2), labels)
+            (x1, x2), labels = batch
+        elif isinstance(batch, list) and len(batch) == 3:
+            # Alternative format: [x1, x2, labels]
+            x1, x2, labels = batch
+        elif isinstance(batch, tuple) and len(batch) == 3:
+            # Alternative format: (x1, x2, labels)
+            x1, x2, labels = batch
+        else:
+            # Try to infer structure based on batch content
+            if len(batch) == 2:
+                # Could be (inputs, labels) where inputs contains both views
+                inputs, labels = batch
+                if isinstance(inputs, torch.Tensor) and inputs.shape[0] == 2:
+                    # Inputs might be a stacked tensor with two views
+                    x1, x2 = inputs[0], inputs[1]
+                elif isinstance(inputs, (list, tuple)) and len(inputs) == 2:
+                    # Inputs might be a list/tuple of two tensors
+                    x1, x2 = inputs
+                else:
+                    # Handle case where inputs is a single view (use it as both views)
+                    x1 = x2 = inputs
+            else:
+                raise ValueError(f"Unexpected batch format: {type(batch)}, {len(batch)}")
+
         z1, z2 = self.forward(x1), self.forward(x2)
         loss = self.criterion(z1, z2)
         self.log("test_loss", loss, prog_bar=True)
@@ -1346,6 +1555,10 @@ class MAEEncoder(nn.Module):
         self.embed_dim = embed_dim
 
     def forward(self, x, mask_ratio=0.75):
+        # Handle the case where x is a list of views (from MAETransform)
+        if isinstance(x, list):
+            x = x[0]  # Take the first view for MAE
+
         # For simplicity, we'll apply masking in the feature space
         h = self.backbone(x).flatten(start_dim=1)
 
