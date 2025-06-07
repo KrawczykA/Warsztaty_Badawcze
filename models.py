@@ -54,6 +54,7 @@ def create_resnet18_backbone(pretrained: bool = True):
         # Load pretrained ResNet18
         resnet = models.resnet18(pretrained=True)
     else:
+
         # Create ResNet18 with random initialization
         resnet = models.resnet18(pretrained=False)
         # Apply custom initialization
@@ -919,7 +920,7 @@ class SimCLRModel(pl.LightningModule):
         self.projection_head = SimCLRProjectionHead(
             hidden_dim, hidden_dim, 128
         )
-        self.criterion = torchmetrics.NTXentLoss()
+        self.criterion = NTXentLoss()
         self.lr = lr
         self.weight_decay = weight_decay
         self.max_epochs = max_epochs
