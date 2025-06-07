@@ -394,4 +394,4 @@ def create_dataset(set_name, SSL_proportion, train_transform, train_full_transfo
     print("Length of SSL train dataset: ", len(train_ssl_dataset))
     print("Length of classification train dataset: ", len(train_dataset))
     print("Length of test dataset: ", len(test_dataset))
-    return train_full_dataset, train_ssl_dataset, train_dataset, test_dataset, targets
+    return train_full_dataset, train_ssl_dataset, train_dataset, test_dataset, targets[:int(0.9 * len(targets))]
