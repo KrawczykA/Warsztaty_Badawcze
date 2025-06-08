@@ -238,11 +238,12 @@ def linear_probing(dl_train, dl_eval, model_backbone, number_of_classes,
     trainer.fit(model, dl_train, dl_eval)
     
     # Get predictions on test set 
-    predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
-    predictions = torch.cat(predictions, dim=0)
-    predictions = torch.argmax(predictions, dim=1).cpu().numpy()
+    # predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
+    # predictions = torch.cat(predictions, dim=0)
+    # predictions = torch.argmax(predictions, dim=1).cpu().numpy()
+    predictions = None
     
-    return model.test_acc, None
+    return model.val_acc[-1].cpu().item(), predictions
 
 def knn_evaluation(train_features, train_labels, test_features, test_labels, k_values):
     """k-NN evaluation dla różnych wartości k"""
@@ -367,13 +368,22 @@ class SSLEvaluator:
         test_features, test_labels = extract_features(model, test_loader, 
                                                      self.config.device, method)
         
+        if method == 'mae':
+            backbone = model.encoder.backbone if hasattr(model.encoder, 'backbone') else model.encoder
+        elif method == 'byol':
+            backbone = model.online_backbone
+        elif method == 'simclr':
+            backbone = model.backbone
+        else:
+            backbone = model.backbone if hasattr(model, 'backbone') else model
+
         # Linear probing
         linear_acc, linear_preds = linear_probing(
             DataLoader(train_data, batch_size=self.config.batch_size, 
                        shuffle=True, num_workers=self.config.num_workers),
             DataLoader(test_data, batch_size=self.config.batch_size, 
                        shuffle=False, num_workers=self.config.num_workers),
-            model.backbone,  # Używamy backbone modelu
+            backbone,  # Używamy backbone modelu
             len(np.unique(train_labels)),  # Liczba klas
             learning_rate=model.checkpoint_info['lr'],  # Używamy lr z checkpointa
             num_epochs=10,
@@ -403,9 +413,9 @@ class SSLEvaluator:
             save_prefix += f"_{hyperparameter_info}"
         
         # Confusion matrix
-        plot_confusion_matrix(test_labels, linear_preds, 
-                            f"Confusion Matrix - {method} on {test_dataset}",
-                            os.path.join(self.config.figures_dir, f"{save_prefix}_confusion.png"))
+        # plot_confusion_matrix(test_labels, linear_preds, 
+        #                     f"Confusion Matrix - {method} on {test_dataset}",
+        #                     os.path.join(self.config.figures_dir, f"{save_prefix}_confusion.png"))
         
         # Feature space visualization
         plot_feature_space(test_features[:5000], test_labels[:5000],  # Subset for speed
