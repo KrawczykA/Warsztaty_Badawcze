@@ -236,7 +236,47 @@ def linear_probing(dl_train, dl_eval, model_backbone, number_of_classes,
 
     # Train the model
     trainer.fit(model, dl_train, dl_eval)
+    #model.eval()
+    #predictions=model(dl_eval.to(device))
+    # Get predictions on test set 
+    # predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
+    # predictions = torch.cat(predictions, dim=0)
+    # predictions = torch.argmax(predictions, dim=1).cpu().numpy()
+    predictions = None
     
+    return model.val_acc[-1].cpu().item(), predictions
+
+
+def fine_tuning(dl_train, dl_eval, model_backbone, number_of_classes, 
+                   learning_rate=0.001, num_epochs=10, device='cuda'):
+    """Linear probing evaluation"""
+    model = deepcopy(model_backbone)
+
+    for param in model.parameters():
+        param.requires_grad = True
+
+    # Add the linear layer to the Sequential model
+    model = torch.nn.Sequential(
+        model,
+        torch.nn.Flatten(),  # Flatten the output of the pooling layer
+        torch.nn.Linear(512, number_of_classes)
+    )
+
+    # Prepare the model
+    model = ClassifierModel(
+        model=model,
+        num_classes=number_of_classes,
+        lr=learning_rate, 
+        max_epochs=num_epochs
+    )
+
+    # Prepare the trainer for pytorch lightning
+    trainer = pl.Trainer(max_epochs=num_epochs, devices=-1, accelerator=device.type)
+
+    # Train the model
+    trainer.fit(model, dl_train, dl_eval)
+    #model.eval()
+    #predictions=model(dl_eval.to(device))
     # Get predictions on test set 
     # predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
     # predictions = torch.cat(predictions, dim=0)
@@ -377,6 +417,17 @@ class SSLEvaluator:
         else:
             backbone = model.backbone if hasattr(model, 'backbone') else model
 
+        fine_tuning_acc, _ = fine_tuning(
+            DataLoader(train_data, batch_size=self.config.batch_size, 
+                       shuffle=True, num_workers=self.config.num_workers),
+            DataLoader(test_data, batch_size=self.config.batch_size, 
+                       shuffle=False, num_workers=self.config.num_workers),
+            backbone,  # Używamy backbone modelu
+            len(np.unique(train_labels)),  # Liczba klas
+            learning_rate=model.checkpoint_info['lr'],  # Używamy lr z checkpointa
+            num_epochs=5,
+            device=self.config.device
+        )
         # Linear probing
         linear_acc, linear_preds = linear_probing(
             DataLoader(train_data, batch_size=self.config.batch_size, 
@@ -386,10 +437,10 @@ class SSLEvaluator:
             backbone,  # Używamy backbone modelu
             len(np.unique(train_labels)),  # Liczba klas
             learning_rate=model.checkpoint_info['lr'],  # Używamy lr z checkpointa
-            num_epochs=10,
+            num_epochs=5,
             device=self.config.device
         )
-        
+
         # k-NN evaluation
         knn_results = knn_evaluation(train_features, train_labels, 
                                     test_features, test_labels, 
@@ -402,6 +453,7 @@ class SSLEvaluator:
             'test_dataset': test_dataset,
             'hyperparameters': hyperparameter_info,
             'linear_probing_accuracy': linear_acc,
+            'fine_tuning_acc': fine_tuning_acc,
             'knn_results': knn_results,
             'best_knn_accuracy': max(knn_results.values()),
             'best_knn_k': max(knn_results, key=knn_results.get)
@@ -507,9 +559,9 @@ class SSLEvaluator:
                                 all_results.append(result)
         
         # Ewaluacja baseline methods
-        for test_dataset in self.config.test_datasets:
+        """for test_dataset in self.config.test_datasets:
             baseline_results = self.evaluate_baselines(test_dataset)
-            all_results.extend(baseline_results)
+            all_results.extend(baseline_results)"""
         
         # Zapisywanie wyników
         results_df = pd.DataFrame(all_results)
@@ -521,10 +573,10 @@ class SSLEvaluator:
             json.dump(all_results, f, indent=2)
         
         # Generowanie wykresów porównawczych
-        plot_comparison_results(results_df, 'linear_probing_accuracy',
+        """plot_comparison_results(results_df, 'linear_probing_accuracy',
                               os.path.join(self.config.figures_dir, 'linear_probing_comparison.png'))
         plot_comparison_results(results_df, 'best_knn_accuracy',
-                              os.path.join(self.config.figures_dir, 'knn_comparison.png'))
+                              os.path.join(self.config.figures_dir, 'knn_comparison.png'))"""
         
         return results_df
     
