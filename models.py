@@ -54,6 +54,7 @@ def create_resnet18_backbone(pretrained: bool = True):
         # Load pretrained ResNet18
         resnet = models.resnet18(pretrained=True)
     else:
+
         # Create ResNet18 with random initialization
         resnet = models.resnet18(pretrained=False)
         # Apply custom initialization
