@@ -62,10 +62,14 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 def get_dataset(dataset_name, train=True):
-    """Wczytuje dataset CIFAR10 lub CIFAR100"""
+    """Wczytuje dataset: CIFAR10, CIFAR100 lub ImageNet"""
+    
     transform = transforms.Compose([
+        transforms.Resize(224),  # dla ImageNet i spójności rozmiarów
+        transforms.CenterCrop(224),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
     ])
     
     if dataset_name == 'cifar10':
@@ -75,6 +79,13 @@ def get_dataset(dataset_name, train=True):
     elif dataset_name == 'cifar100':
         dataset = torchvision.datasets.CIFAR100(
             root='./data', train=train, download=True, transform=transform
+        )
+    elif dataset_name == 'imagenet':
+        # Upewnij się, że masz dane w odpowiednim folderze
+        split = 'train' if train else 'val'
+        dataset = datasets.ImageFolder(
+            root=os.path.join('./data/imagenet', split),
+            transform=transform
         )
     else:
         raise ValueError(f"Nieznany dataset: {dataset_name}")
@@ -189,7 +200,6 @@ def extract_features(model, dataloader, device, method):
                 feat = model.encoder(data)
                 if isinstance(feat, tuple):
                     feat = feat[0]
-                #feat = feat.mean(dim=1)  # Global average pooling
             elif method == 'byol':
                 # BYOL używa online encoder
                     feat = model.online_backbone(data)
@@ -394,7 +404,7 @@ class SSLEvaluator:
         model = load_model(checkpoint_path, method, self.config.device)
         
         # Przygotowanie datasetów
-        train_data = get_dataset(test_dataset, train=True)
+        train_data = get_dataset(train_dataset, train=True)
         test_data = get_dataset(test_dataset, train=False)
         
         train_loader = DataLoader(train_data, batch_size=self.config.batch_size, 
