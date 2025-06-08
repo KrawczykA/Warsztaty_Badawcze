@@ -1,3 +1,4 @@
+from copy import deepcopy
 import os
 import json
 import numpy as np
@@ -12,6 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
+import pytorch_lightning as pl
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from sklearn.neighbors import KNeighborsClassifier
@@ -22,7 +24,7 @@ import umap
 from tqdm import tqdm
 import warnings
 import datasets
-from models import MAEModel,SimCLRModel,BYOLModel  
+from models import MAEModel,SimCLRModel,BYOLModel,ClassifierModel
 from pathlib import Path
 
 warnings.filterwarnings('ignore')
@@ -206,19 +208,41 @@ def extract_features(model, dataloader, device, method):
     return features, labels
 
 # Metody ewaluacji
-def linear_probing(train_features, train_labels, test_features, test_labels, C=1.0):
+def linear_probing(dl_train, dl_eval, model_backbone, number_of_classes, 
+                   learning_rate=0.001, num_epochs=10, device='cuda'):
     """Linear probing evaluation"""
-    scaler = StandardScaler()
-    train_features_scaled = scaler.fit_transform(train_features)
-    test_features_scaled = scaler.transform(test_features)
+    model = deepcopy(model_backbone)
+
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # Add the linear layer to the Sequential model
+    model = torch.nn.Sequential(
+        model,
+        torch.nn.Flatten(),  # Flatten the output of the pooling layer
+        torch.nn.Linear(512, number_of_classes)
+    )
+
+    # Prepare the model
+    model = ClassifierModel(
+        model=model,
+        num_classes=number_of_classes,
+        lr=learning_rate, 
+        max_epochs=num_epochs
+    )
+
+    # Prepare the trainer for pytorch lightning
+    trainer = pl.Trainer(max_epochs=num_epochs, devices=-1, accelerator=device.type)
+
+    # Train the model
+    trainer.fit(model, dl_train, dl_eval)
     
-    clf = LogisticRegression(C=C, max_iter=1000, random_state=42)
-    clf.fit(train_features_scaled, train_labels)
+    # Get predictions on test set 
+    predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
+    predictions = torch.cat(predictions, dim=0)
+    predictions = torch.argmax(predictions, dim=1).cpu().numpy()
     
-    predictions = clf.predict(test_features_scaled)
-    accuracy = accuracy_score(test_labels, predictions)
-    
-    return accuracy, predictions
+    return model.test_acc, None
 
 def knn_evaluation(train_features, train_labels, test_features, test_labels, k_values):
     """k-NN evaluation dla różnych wartości k"""
@@ -344,8 +368,17 @@ class SSLEvaluator:
                                                      self.config.device, method)
         
         # Linear probing
-        linear_acc, linear_preds = linear_probing(train_features, train_labels, 
-                                                  test_features, test_labels)
+        linear_acc, linear_preds = linear_probing(
+            DataLoader(train_data, batch_size=self.config.batch_size, 
+                       shuffle=True, num_workers=self.config.num_workers),
+            DataLoader(test_data, batch_size=self.config.batch_size, 
+                       shuffle=False, num_workers=self.config.num_workers),
+            model.backbone,  # Używamy backbone modelu
+            len(np.unique(train_labels)),  # Liczba klas
+            learning_rate=model.checkpoint_info['lr'],  # Używamy lr z checkpointa
+            num_epochs=10,
+            device=self.config.device
+        )
         
         # k-NN evaluation
         knn_results = knn_evaluation(train_features, train_labels, 
