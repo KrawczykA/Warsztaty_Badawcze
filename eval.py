@@ -116,9 +116,8 @@ def get_dataset(dataset_name, train=True):
         raise ValueError(f"Nieznany dataset: {dataset_name}")
 
     if train:
-        _, train_indices = train_test_split(list(range(len(dataset))), test_size=0.1, random_state=42)
-        dataset = torch.utils.data.Subset(dataset, train_indices) if train else torch.utils.data.Subset(dataset, range(
-            len(dataset) - 2000, len(dataset)))
+        _, train_indices = train_test_split(list(range(len(dataset))), test_size=0.01 if dataset_name == 'imagenet' else 0.1, random_state=42)
+        dataset = torch.utils.data.Subset(dataset, train_indices)
 
     return dataset
 
