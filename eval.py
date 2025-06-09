@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
+from torchvision import  datasets
 import pytorch_lightning as pl
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -31,7 +32,7 @@ warnings.filterwarnings('ignore')
 
 # Konfiguracja
 class Config:
-    def __init__(self):
+    def __init__(self, test_datasets= ['cifar10', 'cifar100'], train_datasets= ['cifar100', 'imagenet'], methods=['mae', 'byol', 'simclr']):
         self.checkpoint_base = "./checkpoints"
         self.results_dir = "./results"
         self.figures_dir = "./figures"
@@ -47,11 +48,11 @@ class Config:
         self.pca_components = 50
         
         # Datasety
-        self.test_datasets = ['cifar10', 'cifar100']
-        self.train_datasets = ['cifar100', 'imagenet']
+        self.test_datasets = test_datasets
+        self.train_datasets = train_datasets
         
         # Modele
-        self.ssl_methods = ['mae', 'byol', 'simclr']
+        self.ssl_methods = methods
         self.baseline_methods = ['pca', 'tsne', 'umap']
 
 # Funkcje pomocnicze
@@ -62,34 +63,60 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 def get_dataset(dataset_name, train=True):
-    """Wczytuje dataset: CIFAR10, CIFAR100 lub ImageNet"""
-    
+    """Wczytuje dataset: CIFAR10, CIFAR100, ImageNet, Caltech101, Pets, Aircrafts"""
+
     transform = transforms.Compose([
-        transforms.Resize(224),  # dla ImageNet i spójności rozmiarów
+        transforms.Resize(224),  # dla spójności rozmiarów
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406],
                              std=[0.229, 0.224, 0.225])
     ])
-    
+
     if dataset_name == 'cifar10':
         dataset = torchvision.datasets.CIFAR10(
             root='./data', train=train, download=True, transform=transform
         )
+
     elif dataset_name == 'cifar100':
         dataset = torchvision.datasets.CIFAR100(
             root='./data', train=train, download=True, transform=transform
         )
+
     elif dataset_name == 'imagenet':
-        # Upewnij się, że masz dane w odpowiednim folderze
         split = 'train' if train else 'val'
         dataset = datasets.ImageFolder(
             root=os.path.join('./data/imagenet', split),
             transform=transform
         )
+
+    elif dataset_name == 'caltech101':
+        dataset = torchvision.datasets.Caltech101(
+            root='./data', download=True, transform=transform
+        )
+
+    elif dataset_name == 'pets':
+        dataset = torchvision.datasets.OxfordIIITPet(
+            root='./data', download=True,
+            transform=transform,
+            target_types='category'  # 'segmentation' też dostępne
+        )
+        if train:
+            # Można zaimplementować własny podział, bo oficjalnie nie ma splitu
+            dataset = torch.utils.data.Subset(dataset, range(0, int(len(dataset)*0.8)))
+        else:
+            dataset = torch.utils.data.Subset(dataset, range(int(len(dataset)*0.8), len(dataset)))
+
+    elif dataset_name == 'aircrafts':
+        dataset = torchvision.datasets.FGVCAircraft(
+            root='./data', download=True,
+            split='trainval' if train else 'test',
+            transform=transform
+        )
+
     else:
         raise ValueError(f"Nieznany dataset: {dataset_name}")
-    
+
     return dataset
 
 def parse_checkpoint_path(checkpoint_path):
@@ -190,16 +217,19 @@ def extract_features(model, dataloader, device, method):
     """Ekstraktuje cechy z modelu SSL"""
     features = []
     labels = []
-    
+
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(tqdm(dataloader, desc="Extracting features")):
             data = data.to(device)
             
             # Różne metody mogą mieć różne sposoby ekstrakcji cech
             if method == 'mae':
+
                 feat = model.encoder(data)
+
                 if isinstance(feat, tuple):
                     feat = feat[0]
+
             elif method == 'byol':
                 # BYOL używa online encoder
                     feat = model.online_backbone(data)
@@ -417,7 +447,6 @@ class SSLEvaluator:
                                                        self.config.device, method)
         test_features, test_labels = extract_features(model, test_loader, 
                                                      self.config.device, method)
-        
         if method == 'mae':
             backbone = model.encoder.backbone if hasattr(model.encoder, 'backbone') else model.encoder
         elif method == 'byol':
@@ -536,7 +565,7 @@ class SSLEvaluator:
         
         return baseline_results
     
-    def run_full_evaluation(self):
+    def run_full_evaluation(self, results_no=1):
         """Uruchamia pełną ewaluację wszystkich modeli"""
         all_results = []
         
@@ -555,8 +584,7 @@ class SSLEvaluator:
                     if os.path.isdir(version_path):
                         # Znalezienie checkpointa
                         checkpoint_files = [f for f in os.listdir(version_path) 
-                                          if f.endswith('.ckpt') or f.endswith('.pt')]
-                        
+                                          if f.endswith('.ckpt') and ('19' in f or '20' in f)]
                         if checkpoint_files:
                             checkpoint_path = os.path.join(version_path, checkpoint_files[0])
                             
@@ -575,11 +603,11 @@ class SSLEvaluator:
         
         # Zapisywanie wyników
         results_df = pd.DataFrame(all_results)
-        results_df.to_csv(os.path.join(self.config.results_dir, 'evaluation_results.csv'), 
+        results_df.to_csv(os.path.join(self.config.results_dir, f'evaluation_results_{results_no}.csv'), 
                          index=False)
         
         # Zapisywanie szczegółowych wyników JSON
-        with open(os.path.join(self.config.results_dir, 'detailed_results.json'), 'w') as f:
+        with open(os.path.join(self.config.results_dir, f'detailed_results.json_{results_no}'), 'w') as f:
             json.dump(all_results, f, indent=2)
         
         # Generowanie wykresów porównawczych
@@ -590,7 +618,7 @@ class SSLEvaluator:
         
         return results_df
     
-    def create_summary_report(self, results_df):
+    def create_summary_report(self, results_df, results_no):
         """Tworzy raport podsumowujący"""
         report = []
         report.append("# SSL Model Evaluation Report\n")
@@ -619,7 +647,7 @@ class SSLEvaluator:
         report.append(method_comparison.to_string())
         
         # Zapisywanie raportu
-        with open(os.path.join(self.config.results_dir, 'evaluation_report.txt'), 'w') as f:
+        with open(os.path.join(self.config.results_dir, f'evaluation_report{results_no}.txt'), 'w') as f:
             f.writelines(report)
         
         print("\n".join(report))
@@ -635,14 +663,14 @@ def evaluate_single(checkpoint_path, method, train_dataset, test_dataset, config
                                            train_dataset, test_dataset)
     return result
 
-def run_complete_evaluation(config=None):
+def run_complete_evaluation(config=None, results_no=1):
     """Wrapper do pełnej ewaluacji"""
     if config is None:
         config = Config()
     
     set_seed(config.seed)
     evaluator = SSLEvaluator(config)
-    results_df = evaluator.run_full_evaluation()
-    evaluator.create_summary_report(results_df)
+    results_df = evaluator.run_full_evaluation(results_no=results_no)
+    evaluator.create_summary_report(results_df, results_no)
     
     return results_df
