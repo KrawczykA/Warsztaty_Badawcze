@@ -111,6 +111,6 @@ def test_add_mae_planes():
 if __name__ == "__main__":
     test_all_100()
     #test_all_imgnet()
-    test_add_mae_caltech()
-    test_add_mae_pets()
-    test_add_mae_planes()
+    # test_add_mae_caltech()
+    # test_add_mae_pets()
+    # test_add_mae_planes()

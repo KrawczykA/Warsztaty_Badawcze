@@ -10,6 +10,7 @@ from typing import Dict, List, Tuple, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import torchvision
 import torchvision.transforms as transforms
@@ -27,6 +28,7 @@ import warnings
 import datasets
 from models import MAEModel,SimCLRModel,BYOLModel,ClassifierModel
 from pathlib import Path
+import gc
 
 warnings.filterwarnings('ignore')
 
@@ -36,7 +38,7 @@ class Config:
         self.checkpoint_base = "./checkpoints"
         self.results_dir = "./results"
         self.figures_dir = "./figures"
-        self.batch_size = 256
+        self.batch_size = 128
         self.num_workers = 4
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.seed = 42
@@ -84,11 +86,8 @@ def get_dataset(dataset_name, train=True):
         )
 
     elif dataset_name == 'imagenet':
-        split = 'train' if train else 'val'
-        dataset = datasets.ImageFolder(
-            root=os.path.join('./data/imagenet', split),
-            transform=transform
-        )
+        path = os.path.join('data', 'imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC/train') if train else os.path.join('data', 'imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC/val')
+        dataset = torchvision.datasets.ImageFolder(path, transform=transform)
 
     elif dataset_name == 'caltech101':
         dataset = torchvision.datasets.Caltech101(
@@ -116,6 +115,10 @@ def get_dataset(dataset_name, train=True):
 
     else:
         raise ValueError(f"Nieznany dataset: {dataset_name}")
+
+    if train:
+        _, train_indices = train_test_split(list(range(len(dataset))), test_size=0.01 if dataset_name == 'imagenet' else 0.1, random_state=42)
+        dataset = torch.utils.data.Subset(dataset, train_indices)
 
     return dataset
 
@@ -456,6 +459,10 @@ class SSLEvaluator:
         else:
             backbone = model.backbone if hasattr(model, 'backbone') else model
 
+        torch.cuda.empty_cache()
+        gc.collect()
+
+
         fine_tuning_acc, _ = fine_tuning(
             DataLoader(train_data, batch_size=self.config.batch_size, 
                        shuffle=True, num_workers=self.config.num_workers),
@@ -467,6 +474,10 @@ class SSLEvaluator:
             num_epochs=5,
             device=self.config.device
         )
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
         # Linear probing
         linear_acc, linear_preds = linear_probing(
             DataLoader(train_data, batch_size=self.config.batch_size, 
@@ -479,6 +490,9 @@ class SSLEvaluator:
             num_epochs=5,
             device=self.config.device
         )
+
+        torch.cuda.empty_cache()
+        gc.collect()
 
         # k-NN evaluation
         knn_results = knn_evaluation(train_features, train_labels, 
@@ -564,11 +578,11 @@ class SSLEvaluator:
         })
         
         return baseline_results
-    
+
     def run_full_evaluation(self, results_no=1):
         """Uruchamia pełną ewaluację wszystkich modeli"""
         all_results = []
-        
+
         # Ewaluacja modeli SSL
         for train_dataset in self.config.train_datasets:
             for method in self.config.ssl_methods:
@@ -577,45 +591,49 @@ class SSLEvaluator:
                 if not os.path.exists(method_path):
                     print(f"Skipping {method_path} - directory not found")
                     continue
-                
+
                 # Iteracja przez różne wersje (ran, pre-2, pre-3)
                 for version_dir in os.listdir(method_path):
                     version_path = os.path.join(method_path, version_dir)
                     if os.path.isdir(version_path):
                         # Znalezienie checkpointa
-                        checkpoint_files = [f for f in os.listdir(version_path) 
-                                          if f.endswith('.ckpt') and ('19' in f or '20' in f)]
+                        if train_dataset == 'imagenet':
+                            checkpoint_files = [f for f in os.listdir(version_path)
+                                                if f.endswith('.ckpt') and ('5' in f)]
+                        else:
+                            checkpoint_files = [f for f in os.listdir(version_path)
+                                                if f.endswith('.ckpt') and ('19' in f or '20' in f)]
                         if checkpoint_files:
                             checkpoint_path = os.path.join(version_path, checkpoint_files[0])
-                            
+
                             # Ewaluacja na różnych datasetach testowych
                             for test_dataset in self.config.test_datasets:
                                 result = self.evaluate_single_model(
-                                    checkpoint_path, method, train_dataset, 
+                                    checkpoint_path, method, train_dataset,
                                     test_dataset, version_dir
                                 )
                                 all_results.append(result)
-        
+
         # Ewaluacja baseline methods
         """for test_dataset in self.config.test_datasets:
             baseline_results = self.evaluate_baselines(test_dataset)
             all_results.extend(baseline_results)"""
-        
+
         # Zapisywanie wyników
         results_df = pd.DataFrame(all_results)
-        results_df.to_csv(os.path.join(self.config.results_dir, f'evaluation_results_{results_no}.csv'), 
-                         index=False)
-        
+        results_df.to_csv(os.path.join(self.config.results_dir, f'evaluation_results_{results_no}.csv'),
+                          index=False)
+
         # Zapisywanie szczegółowych wyników JSON
         with open(os.path.join(self.config.results_dir, f'detailed_results.json_{results_no}'), 'w') as f:
             json.dump(all_results, f, indent=2)
-        
+
         # Generowanie wykresów porównawczych
         """plot_comparison_results(results_df, 'linear_probing_accuracy',
                               os.path.join(self.config.figures_dir, 'linear_probing_comparison.png'))
         plot_comparison_results(results_df, 'best_knn_accuracy',
                               os.path.join(self.config.figures_dir, 'knn_comparison.png'))"""
-        
+
         return results_df
     
     def create_summary_report(self, results_df, results_no):
