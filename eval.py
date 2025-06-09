@@ -65,7 +65,7 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 def get_dataset(dataset_name, train=True):
-    """Wczytuje dataset: CIFAR10, CIFAR100, ImageNet, Caltech101, Pets, Aircrafts"""
+    """Wczytuje dataset: CIFAR10, CIFAR100, ImageNet, Flowers, Pets, Aircrafts"""
 
     transform = transforms.Compose([
         transforms.Resize(224),  # dla spójności rozmiarów
@@ -87,11 +87,11 @@ def get_dataset(dataset_name, train=True):
 
     elif dataset_name == 'imagenet':
         path = os.path.join('data', 'imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC/train') if train else os.path.join('data', 'imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC/val')
-        dataset = torchvision.datasets.ImageFolder(path, transform=transform)
+        
 
-    elif dataset_name == 'caltech101':
-        dataset = torchvision.datasets.Caltech101(
-            root='./data', download=True, transform=transform
+    elif dataset_name == 'flowers':
+            dataset = torchvision.datasets.Flowers102(
+            root='./data', split='train' if train else 'test', download=True, transform=transform
         )
 
     elif dataset_name == 'pets':
@@ -116,11 +116,35 @@ def get_dataset(dataset_name, train=True):
     else:
         raise ValueError(f"Nieznany dataset: {dataset_name}")
 
-    if train:
-        _, train_indices = train_test_split(list(range(len(dataset))), test_size=0.01 if dataset_name == 'imagenet' else 0.1, random_state=42)
-        dataset = torch.utils.data.Subset(dataset, train_indices)
 
-    return dataset
+    subset_size = 0.01 if dataset_name == 'imagenet' else 0.1
+    all_indices = list(range(len(dataset)))
+    
+    # losowy podzbiór danych (np. 1% lub 10%)
+    sampled_indices, _ = train_test_split(
+        all_indices,
+        train_size=subset_size,
+        random_state=42,
+        shuffle=True
+    )
+    
+    # wybrany podzbiór danych
+    dataset = torch.utils.data.Subset(dataset, sampled_indices)
+
+    # Krok 2: podział na train/test (90/10)
+    indices = list(range(len(dataset)))  # teraz odniesienia do sampled_indices
+    train_indices, test_indices = train_test_split(
+        indices,
+        test_size=0.1,
+        random_state=42,
+        shuffle=True
+    )
+
+    # Krok 3: zwróć odpowiedni podzbiór
+    if train:
+        return torch.utils.data.Subset(dataset, train_indices)
+    else:
+        return torch.utils.data.Subset(dataset, test_indices)
 
 def parse_checkpoint_path(checkpoint_path):
     """Ekstraktuje informacje ze ścieżki checkpointa"""
@@ -437,7 +461,7 @@ class SSLEvaluator:
         model = load_model(checkpoint_path, method, self.config.device)
         
         # Przygotowanie datasetów
-        train_data = get_dataset(train_dataset, train=True)
+        train_data = get_dataset(test_dataset, train=True)
         test_data = get_dataset(test_dataset, train=False)
         
         train_loader = DataLoader(train_data, batch_size=self.config.batch_size, 

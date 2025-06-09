@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader
 import os
 from pathlib import Path
 from models import BYOLModel, SimCLRModel
-
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning)
 
 import eval
 import importlib
@@ -56,8 +57,8 @@ def test_all_imgnet():
         ['method', 'train_dataset', 'test_dataset', 'best_knn_accuracy', 'best_knn_k']
     ])
 
-def test_add_mae_caltech():
-    config=Config(train_datasets=['cifar100'],test_datasets=['caltech101'],methods=['mae'])
+def test_add_mae_flowers():
+    config=Config(train_datasets=['cifar100'],test_datasets=['flowers'],methods=['mae'])
     results_df = run_complete_evaluation(config, results_no=3)
 
     # Wyświetl podsumowanie
@@ -111,6 +112,6 @@ def test_add_mae_planes():
 if __name__ == "__main__":
     test_all_100()
     #test_all_imgnet()
-    # test_add_mae_caltech()
+    # test_add_mae_flowers()
     # test_add_mae_pets()
     # test_add_mae_planes()
