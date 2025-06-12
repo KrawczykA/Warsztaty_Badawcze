@@ -296,12 +296,6 @@ def linear_probing(dl_train, dl_eval, model_backbone, number_of_classes,
 
     # Train the model
     trainer.fit(model, dl_train, dl_eval)
-    # model.eval()
-    # predictions=model(dl_eval.to(device))
-    # Get predictions on test set
-    # predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
-    # predictions = torch.cat(predictions, dim=0)
-    # predictions = torch.argmax(predictions, dim=1).cpu().numpy()
     predictions = None
 
     return model.val_acc[-1].cpu().item(), predictions
@@ -335,12 +329,6 @@ def fine_tuning(dl_train, dl_eval, model_backbone, number_of_classes,
 
     # Train the model
     trainer.fit(model, dl_train, dl_eval)
-    # model.eval()
-    # predictions=model(dl_eval.to(device))
-    # Get predictions on test set
-    # predictions = trainer.predict(model, dl_eval) # TODO: TO JEST ZLE
-    # predictions = torch.cat(predictions, dim=0)
-    # predictions = torch.argmax(predictions, dim=1).cpu().numpy()
     predictions = None
 
     return model.val_acc[-1].cpu().item(), predictions
