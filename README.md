@@ -5,7 +5,7 @@
 ## Struktura Projektu
 
 ### 📁 `ssl_training/`
-Folder zawierający implementację i trening modeli Self-Supervised Learning:
+Folder zawierający implementację i trening modeli Self-Supervised Learning i baselinowych:
 
 - **`datasets.py`** - funkcje pomocnicze do ładowania i pobierania zbiorów danych
 - **`models.py`** - implementacje modeli SSL (BYOL, SimCLR, MAE) i baselinowego
@@ -15,7 +15,7 @@ Folder zawierający implementację i trening modeli Self-Supervised Learning:
 ### 📁 `evaluation/`
 Folder zawierający kod do ewaluacji wytrenowanych modeli:
 
-- **`CKNNA.ipynb`** - notebook do ewaluacji metodą k-NN (k-Nearest Neighbors)
+- **`CKNNA.ipynb`** - notebook do liczenia metryki CKNNA
 - **`datasets.py`** - funkcje pomocnicze do ładowania zbiorów danych do ewaluacji
 - **`eval.py`** - główny plik ewaluacji:
   - Klasa `Config` - konfiguracja parametrów ewaluacji
