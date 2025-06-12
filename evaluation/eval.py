@@ -401,33 +401,6 @@ def plot_feature_space(features, labels, title, save_path, method='tsne'):
     plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-
-def plot_comparison_results(results_df, metric='accuracy', save_path='comparison.png'):
-    """Porównuje wyniki różnych metod"""
-    plt.figure(figsize=(15, 8))
-
-    # Grupowanie danych
-    methods = results_df['method'].unique()
-    datasets = results_df['test_dataset'].unique()
-
-    x = np.arange(len(methods))
-    width = 0.35
-
-    for i, dataset in enumerate(datasets):
-        data = results_df[results_df['test_dataset'] == dataset]
-        accuracies = [data[data['method'] == m][metric].values[0] for m in methods]
-        plt.bar(x + i * width, accuracies, width, label=dataset)
-
-    plt.xlabel('Method')
-    plt.ylabel(metric.capitalize())
-    plt.title(f'{metric.capitalize()} Comparison Across Methods')
-    plt.xticks(x + width / 2, methods, rotation=45)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
-    plt.close()
-
-
 # Główna klasa ewaluacji
 class SSLEvaluator:
     def __init__(self, config: Config):
@@ -539,56 +512,6 @@ class SSLEvaluator:
 
         return result
 
-    def evaluate_baselines(self, test_dataset):
-        """Ewaluuje baseline methods (PCA, t-SNE, UMAP)"""
-        print(f"\nEvaluating baseline methods on {test_dataset}")
-
-        # Wczytywanie danych
-        train_data = get_dataset(test_dataset, train=True)
-        test_data = get_dataset(test_dataset, train=False)
-
-        # Konwersja do numpy
-        train_features = []
-        train_labels = []
-        for img, label in train_data:
-            train_features.append(img.numpy().flatten())
-            train_labels.append(label)
-        train_features = np.array(train_features)
-        train_labels = np.array(train_labels)
-
-        test_features = []
-        test_labels = []
-        for img, label in test_data:
-            test_features.append(img.numpy().flatten())
-            test_labels.append(label)
-        test_features = np.array(test_features)
-        test_labels = np.array(test_labels)
-
-        baseline_results = []
-
-        # PCA
-        pca_train = baseline_representations(train_features, train_labels, 'pca',
-                                             self.config.pca_components)
-        pca_test = PCA(n_components=self.config.pca_components,
-                       random_state=42).fit(train_features).transform(test_features)
-
-        pca_acc, _ = linear_probing(pca_train, train_labels, pca_test, test_labels)
-        pca_knn = knn_evaluation(pca_train, train_labels, pca_test, test_labels,
-                                 self.config.knn_neighbors)
-
-        baseline_results.append({
-            'method': 'PCA',
-            'test_dataset': test_dataset,
-            'train_dataset': None,  # or 'N/A'
-            'hyperparameters': None,
-            'linear_probing_accuracy': pca_acc,
-            'knn_results': pca_knn,
-            'best_knn_accuracy': max(pca_knn.values()),
-            'best_knn_k': max(pca_knn, key=pca_knn.get) if len(pca_knn) > 0 else None
-        })
-
-        return baseline_results
-
     def run_full_evaluation(self, results_no=1):
         """Uruchamia pełną ewaluację wszystkich modeli"""
         all_results = []
@@ -624,11 +547,6 @@ class SSLEvaluator:
                                 )
                                 all_results.append(result)
 
-        # Ewaluacja baseline methods
-        """for test_dataset in self.config.test_datasets:
-            baseline_results = self.evaluate_baselines(test_dataset)
-            all_results.extend(baseline_results)"""
-
         # Zapisywanie wyników
         results_df = pd.DataFrame(all_results)
         results_df.to_csv(os.path.join(self.config.results_dir, f'evaluation_results_{results_no}.csv'),
@@ -637,12 +555,6 @@ class SSLEvaluator:
         # Zapisywanie szczegółowych wyników JSON
         with open(os.path.join(self.config.results_dir, f'detailed_results.json_{results_no}'), 'w') as f:
             json.dump(all_results, f, indent=2)
-
-        # Generowanie wykresów porównawczych
-        """plot_comparison_results(results_df, 'linear_probing_accuracy',
-                              os.path.join(self.config.figures_dir, 'linear_probing_comparison.png'))
-        plot_comparison_results(results_df, 'best_knn_accuracy',
-                              os.path.join(self.config.figures_dir, 'knn_comparison.png'))"""
 
         return results_df
 

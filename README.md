@@ -25,7 +25,6 @@ Folder zawierający kod do ewaluacji wytrenowanych modeli:
   - `linear_probing()` - ewaluacja przez linear probing
   - `fine_tuning()` - ewaluacja przez fine-tuning
   - `knn_evaluation()` - klasyfikacja k-NN na reprezentacjach
-  - `baseline_representations()` - redukcja wymiarów (PCA, t-SNE, UMAP)
   - Klasa `SSLEvaluator` - orkiestracja pełnej ewaluacji
 - **`evaluating_baselines.ipynb`** - notebook do ewaluacji modeli baseline:
 - **`evaluation_whole.py`** - skrypty do uruchamiania ewaluacji:
